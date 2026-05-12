@@ -540,6 +540,34 @@ class LoadTransparentPNG:
         return (data, preview.clamp(0.0, 1.0))
 
 
+class ImageCutoutToTransparentPNGPipe:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "image": ("IMAGE",),
+            },
+        }
+
+    RETURN_TYPES = ("TRANSPARENT_PNG_RGBA", "IMAGE")
+    RETURN_NAMES = ("transparent_png", "preview")
+    FUNCTION = "convert"
+    CATEGORY = "image/cleanup"
+    DESCRIPTION = "Converts an upstream cutout IMAGE into the transparent PNG pipe by preserving alpha when present, or estimating alpha from the background color."
+
+    def convert(self, image):
+        image = image.to(dtype=torch.float32).clamp(0.0, 1.0)
+        rgb = image[..., :3]
+        if image.shape[-1] >= 4:
+            alpha = image[..., 3].clamp(0.0, 1.0)
+        else:
+            alpha = _infer_alpha_from_corners(rgb)
+
+        data = TransparentPNGData(rgb, alpha, "upstream_image")
+        preview = rgb * alpha.unsqueeze(-1)
+        return (data, preview.clamp(0.0, 1.0))
+
+
 class CleanLoadedPNGCompositeBackground:
     @classmethod
     def INPUT_TYPES(cls):
@@ -707,12 +735,14 @@ class SaveTransparentPNG:
 
 NODE_CLASS_MAPPINGS = {
     "LoadTransparentPNGWithAlpha": LoadTransparentPNG,
+    "ImageCutoutToTransparentPNGPipe": ImageCutoutToTransparentPNGPipe,
     "CleanLoadedPNGCompositeBackground": CleanLoadedPNGCompositeBackground,
     "CleanPNGEdgeCompositeBackground": CleanPNGEdgeCompositeBackground,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadTransparentPNGWithAlpha": "Load Transparent PNG (Keep Alpha)",
+    "ImageCutoutToTransparentPNGPipe": "Image Cutout To Transparent PNG Pipe",
     "CleanLoadedPNGCompositeBackground": "Clean Loaded PNG + Composite Background",
     "CleanPNGEdgeCompositeBackground": "Clean PNG Edge + Composite Background",
 }

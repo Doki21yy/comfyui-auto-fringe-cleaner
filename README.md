@@ -7,6 +7,7 @@ It is designed for PNGs that have already been cut out but still show black, blu
 ## Nodes
 
 - `Load Transparent PNG (Keep Alpha)`
+- `Image Cutout To Transparent PNG Pipe`
 - `Clean Loaded PNG + Composite Background`
 - `Clean PNG Edge + Composite Background`
 
@@ -23,6 +24,17 @@ All nodes appear under `image/cleanup`.
 The special loader outputs a custom `TRANSPARENT_PNG_RGBA` pipe, so RGB and real alpha stay together. This avoids ComfyUI's normal `IMAGE` alpha loss.
 
 `Clean PNG Edge + Composite Background` is still available as a one-node shortcut: it picks/uploads the transparent PNG inside the compositing node.
+
+## Upstream Cutout Workflow
+
+If another node already outputs a cutout `IMAGE`, use this bridge:
+
+1. Connect the cutout node `image` output to `Image Cutout To Transparent PNG Pipe`.
+2. Connect its `transparent_png` output to `Clean Loaded PNG + Composite Background`.
+3. Connect background `图像` from regular `Load Image` to `background_image`.
+4. Save the final `image` output.
+
+`Image Cutout To Transparent PNG Pipe` keeps alpha if the upstream image has it. If the upstream image is RGB on a solid blue, green, black, or red background, it estimates alpha from the background automatically.
 
 ## Installation
 
