@@ -34,7 +34,7 @@ If another node already outputs a cutout `IMAGE`, use this bridge:
 3. Connect background `图像` from regular `Load Image` to `background_image`.
 4. Save the final `image` output.
 
-`Image Cutout To Transparent PNG Pipe` keeps alpha if the upstream image has it. If the upstream image is RGB on a solid blue, green, black, or red background, it estimates alpha from the background automatically.
+`Image Cutout To Transparent PNG Pipe` keeps alpha if the upstream image has it. It does not guess alpha from color, because color guessing can accidentally remove real foreground details. If the upstream image is plain RGB, it is treated as fully opaque.
 
 ## Installation
 

@@ -128,6 +128,11 @@ def _mask_to_alpha(mask, mask_mode, height, width, batch_size):
 
 
 def _infer_alpha_from_corners(image):
+    try:
+        return _infer_alpha_from_border_connected_background(image)
+    except Exception:
+        pass
+
     height, width = image.shape[1], image.shape[2]
     patch = max(2, min(height, width) // 64)
     corners = torch.cat(
@@ -143,6 +148,62 @@ def _infer_alpha_from_corners(image):
     distance = (image - bg).abs().amax(dim=-1)
     alpha = ((distance - 0.03) / 0.12).clamp(0.0, 1.0)
     return _box_blur_nhwc(alpha.unsqueeze(-1), 1)[..., 0].clamp(0.0, 1.0)
+
+
+def _infer_alpha_from_border_connected_background(image):
+    import numpy as np
+
+    try:
+        import cv2
+    except Exception:
+        cv2 = None
+
+    image_cpu = image[..., :3].detach().to(dtype=torch.float32, device="cpu").clamp(0.0, 1.0)
+    batch_size, height, width, _ = image_cpu.shape
+    patch = max(2, min(height, width) // 64)
+    alphas = []
+
+    for item in image_cpu:
+        rgb = item.numpy()
+        corners = np.concatenate(
+            [
+                rgb[:patch, :patch].reshape(-1, 3),
+                rgb[:patch, -patch:].reshape(-1, 3),
+                rgb[-patch:, :patch].reshape(-1, 3),
+                rgb[-patch:, -patch:].reshape(-1, 3),
+            ],
+            axis=0,
+        )
+        bg = np.median(corners, axis=0).reshape(1, 1, 3)
+        distance = np.max(np.abs(rgb - bg), axis=-1)
+
+        background_candidate = distance <= 0.18
+        if cv2 is not None:
+            labels_count, labels = cv2.connectedComponents(background_candidate.astype(np.uint8), connectivity=4)
+            border_labels = np.unique(
+                np.concatenate(
+                    [
+                        labels[0, :],
+                        labels[-1, :],
+                        labels[:, 0],
+                        labels[:, -1],
+                    ]
+                )
+            )
+            border_labels = border_labels[border_labels != 0]
+            if len(border_labels) > 0:
+                connected_background = np.isin(labels, border_labels)
+            else:
+                connected_background = np.zeros((height, width), dtype=bool)
+        else:
+            connected_background = background_candidate.copy()
+
+        color_alpha = np.clip((distance - 0.03) / 0.12, 0.0, 1.0)
+        alpha = np.ones((height, width), dtype=np.float32)
+        alpha[connected_background] = color_alpha[connected_background]
+        alphas.append(torch.from_numpy(alpha))
+
+    return torch.stack(alphas, dim=0).to(device=image.device, dtype=image.dtype).clamp(0.0, 1.0)
 
 
 def _clean_rgb_with_alpha(
@@ -553,7 +614,7 @@ class ImageCutoutToTransparentPNGPipe:
     RETURN_NAMES = ("transparent_png", "preview")
     FUNCTION = "convert"
     CATEGORY = "image/cleanup"
-    DESCRIPTION = "Converts an upstream cutout IMAGE into the transparent PNG pipe by preserving alpha when present, or estimating alpha from the background color."
+    DESCRIPTION = "Converts an upstream cutout IMAGE into the transparent PNG pipe by preserving alpha when present. RGB inputs are treated as fully opaque."
 
     def convert(self, image):
         image = image.to(dtype=torch.float32).clamp(0.0, 1.0)
@@ -561,7 +622,7 @@ class ImageCutoutToTransparentPNGPipe:
         if image.shape[-1] >= 4:
             alpha = image[..., 3].clamp(0.0, 1.0)
         else:
-            alpha = _infer_alpha_from_corners(rgb)
+            alpha = torch.ones(rgb.shape[:-1], dtype=rgb.dtype, device=rgb.device)
 
         data = TransparentPNGData(rgb, alpha, "upstream_image")
         preview = rgb * alpha.unsqueeze(-1)
